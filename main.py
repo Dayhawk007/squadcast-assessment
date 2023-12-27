@@ -296,6 +296,15 @@ class MovieRatingsDatabase:
 
 movie_ratings_db = MovieRatingsDatabase()
 
+#Creating tables
+
+movie_ratings_db.create_tables()
+
+#Inserting data from csv to db
+
+movie_ratings_db.insert_data()
+
+
 # Sorting Queries for all the methods in task 2-a
 movie_ratings_db.sorting_query('duration')
 movie_ratings_db.sorting_query('year')
