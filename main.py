@@ -173,11 +173,127 @@ class MovieRatingsDatabase:
         print("Top 5 movies rated in 2013: \n")
         print(df,"\n")
     
+    def top_rated_in_india(self):
+        self.cursor.execute("""SELECT movies.title, AVG(ratings.rating) AS avg_rating
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE movies.country = 'India'
+                                GROUP BY movies.title
+                                HAVING COUNT(ratings.rating) >= 5
+                                ORDER BY avg_rating DESC
+                                LIMIT 5;
+                                """)
+        result=self.cursor.fetchall()
+        
+        # Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Title', 'Average Rating'])
+        print("Top 5 movies rated in India: \n")
+        print(df,"\n")
+    
+    def fav_movie_genre_1040(self):
+        # We first fetch all the ratings for rater_id 1040
+        self.cursor.execute("""SELECT movies.genre
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE ratings.rater_id = 1040
+                                GROUP BY movies.genre
+                                ORDER BY COUNT(ratings.rating) DESC
+                                """)
+        result=self.cursor.fetchall()
+        
+        #We can also put limit on the upper query as 1 to get the exact genre which will be 'Action, Adventure, Sci-Fi' but I thought a single genre would be better :)
+        
+        
+        # We then create a map of all the genres separated by comma and their count
+        
+        genre_map = {}
+        
+        for genre_string in result:
+            for genre in genre_string[0].split(','):
+                if genre in genre_map:
+                    genre_map[genre] += 1
+                else:
+                    genre_map[genre] = 1
+        
+        sorted_map = sorted(genre_map.items(), key=lambda x: x[1], reverse=True)
+        
+        print("Favourite movie genre for rater_id 1040: ", sorted_map[0][0],"\n")
+    
+    def highest_avg_rating_genre_by_1040(self):
+        self.cursor.execute("""SELECT movies.genre, AVG(ratings.rating) AS avg_rating
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE ratings.rater_id = 1040
+                                GROUP BY movies.genre
+                                HAVING COUNT(ratings.rating) >= 5
+                                ORDER BY avg_rating DESC;
+                                """)
+        result=self.cursor.fetchall()
+        
+        # We can again put limit on the upper query as 1 to get the exact genre which will be 'Action, Adventure, Sci-Fi' but I thought a single genre would be better :)
+
+        # We then create a map of all the genres separated by comma and their count
+        
+        genre_map = {}
+        
+        for genre_string in result:
+            for genre in genre_string[0].split(','):
+                if genre in genre_map:
+                    genre_map[genre] += 1
+                else:
+                    genre_map[genre] = 1
+        
+        sorted_map = sorted(genre_map.items(), key=lambda x: x[1], reverse=True)
+        
+        
+        print("Highest Average Rating for a movie genre for rater_id 1040: ", sorted_map[0][0],"\n")
+        
+        
+    def year_with_second_highest_action_movies(self):
+        # We use CTE to get the year with second highest action movies 
+        self.cursor.execute("""WITH RankedYears AS (
+                                SELECT
+                                    movies.year,
+                                    ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS row_num
+                                FROM
+                                    movies
+                                    JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE
+                                    LOWER(movies.genre) LIKE '%action%'
+                                    AND movies.country = 'USA'
+                                    AND movies.minutes < 120
+                                GROUP BY
+                                    movies.year
+                                HAVING
+                                    AVG(ratings.rating) >= 6.5
+                            )
+                            SELECT
+                                year
+                            FROM
+                                RankedYears
+                            WHERE
+                                row_num = 2;
+                            """)
+        
+        result=self.cursor.fetchall()
+        
+        print("Year with second highest action movies: ", result[0][0],"\n")
+        
+    def count_of_movies_with_high_ratings(self):
+        
+        self.cursor.execute("""SELECT COUNT(movie_id) AS high_rated_movies_count
+                                FROM ratings
+                                WHERE rating >= 7
+                                GROUP BY movie_id
+                                HAVING COUNT(movie_id) >= 5;
+                                """)
+
+        result=self.cursor.fetchall()
+        
+        print("Count of movies with high ratings: ", result[0][0],"\n")
     
     
 
-
-# Example usage:
 movie_ratings_db = MovieRatingsDatabase()
 
 # Sorting Queries for all the methods in task 2-a
@@ -197,4 +313,16 @@ movie_ratings_db.sort_rater_ids_by_max_avg_ratings()
 movie_ratings_db.top_rated_by_michael_bay()
 movie_ratings_db.top_rated_by_comedy()
 movie_ratings_db.top_rated_in_2013()
+movie_ratings_db.top_rated_in_india()
 
+#Top rated movie genre for rater_id 1040 for task 2-e
+movie_ratings_db.fav_movie_genre_1040()
+
+#Highest average rating genre for rater_id 1040 for task 2-f
+movie_ratings_db.highest_avg_rating_genre_by_1040()
+
+#Year with second highest action movies for task 2-g
+movie_ratings_db.year_with_second_highest_action_movies()
+
+#Count of movies with high ratings for task 2-h
+movie_ratings_db.count_of_movies_with_high_ratings()
