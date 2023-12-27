@@ -1,97 +1,200 @@
 import psycopg2
 import csv
 from datetime import datetime
+import pandas as pd
 
-#Connecting to the database and using local database because render doesn't have superuser rights for importing csv
+class MovieRatingsDatabase:
+    def __init__(self, database="movies_ratings", user='postgres', password='1234', host='127.0.0.1', port='5432'):
+        # Connecting to the database and using a local database because render doesn't have superuser rights for importing csv
+        self.conn = psycopg2.connect(database=database, user=user, password=password, host=host, port=port)
+        self.conn.autocommit = True
+        self.cursor = self.conn.cursor()
 
-conn = psycopg2.connect(database="movies_ratings", 
-                        user='postgres', password='1234',  
-                        host='127.0.0.1', port='5432'
-) 
+    def create_tables(self):
+        # Function to create both tables
+        creation_query_movies = '''
+        CREATE TABLE MOVIES(
+            id int NOT NULL,
+            title varchar, 
+            year int,
+            country varchar,
+            genre varchar,
+            director varchar,
+            minutes int,
+            poster varchar
+        );
+        '''
 
-conn.autocommit = True
-cursor = conn.cursor()
+        creation_query_ratings = '''
+        CREATE TABLE RATINGS(
+            rater_id int NOT NULL,
+            movie_id int NOT NULL,
+            rating int,
+            time timestamp
+        );
+        '''
+
+        self.cursor.execute(creation_query_movies)
+        self.cursor.execute(creation_query_ratings)
+        print("Tables created successfully........")
+
+    def insert_data(self, movies_csv_path='E:/Job_Assignments/squadcast-assessment/movies.csv', ratings_csv_path='ratings.csv'):
+        # Function to insert data from csv to db
+        insertion_query_movies = f'''COPY movies FROM '{movies_csv_path}' DELIMITER ',' CSV HEADER;'''
+        self.cursor.execute(insertion_query_movies)
+
+        with open(ratings_csv_path, 'r') as ratings_csv:
+            csv_reader = csv.reader(ratings_csv)
+
+            for row in csv_reader:
+                if row[0] == 'rater_id':
+                    continue
+                timestamp = datetime.utcfromtimestamp(int(row[3]))
+                self.cursor.execute("INSERT INTO RATINGS (rater_id, movie_id, rating, time) VALUES (%s, %s, %s, %s)",
+                                    (row[0], row[1], row[2], timestamp))
+
+        print("Data inserted successfully........")
+
+    def sorting_query(self, method='avg_rating'):
+        # Function to perform sorting queries
+        if method == 'duration':
+            sorting_query = '''SELECT title, minutes FROM movies ORDER BY minutes DESC LIMIT 5;'''
+        elif method == 'year':
+            sorting_query = '''SELECT title, year FROM movies ORDER BY year DESC LIMIT 5;'''
+        elif method == 'number_of_ratings':
+            # We use inner join to get the number of ratings for each movie
+            sorting_query = '''SELECT movies.title, COUNT(ratings.rating) as number_of_ratings
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                GROUP BY movies.title
+                                ORDER BY number_of_ratings DESC LIMIT 5;'''
+        else:  # Default is 'avg_rating'
+            # Here also we use inner join to get the average rating for each movie
+            sorting_query = '''SELECT movies.title, AVG(ratings.rating) as avg_rating
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                GROUP BY movies.title
+                                HAVING COUNT(ratings.rating) >= 5
+                                ORDER BY avg_rating DESC LIMIT 5;'''
+
+        self.cursor.execute(sorting_query)
+        result = self.cursor.fetchall()
+
+        if method == 'duration':
+            print("Top 5 movies by duration:")
+        elif method == 'year':
+            print("Top 5 movies by year:")
+        elif method == 'number_of_ratings':
+            print("Top 5 movies by number of ratings:")
+        else:  # Default is 'avg_rating'
+            print("Top 5 movies by average rating:")
+
+        # Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Title', method.capitalize()])
+        print(df,"\n")
+
+    def unique_rating_ids(self):
+        self.cursor.execute("SELECT DISTINCT rater_id FROM ratings;")
+        result = self.cursor.fetchall()
+        print("Unique rating ids: ", result[0][0],"\n")
 
 
-#Function to create both tables
+    def sort_rater_ids_by_most_movies_rated(self):
+        self.cursor.execute("SELECT rater_id, COUNT(movie_id) as movies_rated_count FROM ratings GROUP BY rater_id ORDER BY movies_rated_count DESC LIMIT 5;")
+        result = self.cursor.fetchall()
 
-def create_tables(cursor):
-
-    creation_query_movies='''CREATE TABLE MOVIES(id int NOT NULL,
-                            title varchar, 
-                            year int,
-                            country varchar,
-                            genre varchar,
-                            director varchar
-                            ,minutes int,
-                            poster varchar);'''
-                            
-    creation_query_ratings='''CREATE TABLE RATINGS(rater_id int NOT NULL,
-                            movie_id int NOT NULL,
-                            rating int,
-                            time timestamp);'''
-
-    cursor.execute(creation_query_movies)
-
-    cursor.execute(creation_query_ratings)
+        # Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Rater ID', 'Movies Rated Count'])
+        print("Top 5 rater ids by most movies rated: \n")
+        print(df,"\n")
     
-    print("Tables created successfully........")
-
-def insert_data(cursor):
-    insertion_query_movies='''COPY movies FROM 'E:\Job_Assignments\squadcast-assessment\\movies.csv' DELIMITER ',' CSV HEADER;'''
-
-    cursor.execute(insertion_query_movies)
-
-    with open('ratings.csv', 'r') as ratings_csv:
-        csv_reader = csv.reader(ratings_csv)
+    def sort_rater_ids_by_max_avg_ratings(self):
+        self.cursor.execute("""SELECT rater_id, AVG(rating) AS avg_rating
+                                FROM ratings
+                                GROUP BY rater_id
+                                HAVING COUNT(rating) >= 5
+                                ORDER BY avg_rating DESC
+                                LIMIT 5;
+                                """)
+        result = self.cursor.fetchall()
         
-        for row in csv_reader:
-            if(row[0]=='rater_id'):
-                continue
-            timestamp=datetime.utcfromtimestamp(int(row[3]))
-            cursor.execute("INSERT INTO RATINGS (rater_id,movie_id,rating,time) VALUES (%s,%s,%s,%s)", (row[0],row[1],row[2],timestamp))   
-
-    print("Data inserted successfully........")
+        # Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Rater ID', 'Average Rating'])
+        print("Top 5 rater ids by max average ratings: \n")
+        print(df,"\n")
+        
+    
+    def top_rated_by_michael_bay(self):
+        self.cursor.execute("""SELECT movies.title, AVG(ratings.rating) AS avg_rating
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE movies.director = 'Michael Bay'
+                                GROUP BY movies.title
+                                ORDER BY avg_rating DESC
+                                LIMIT 5;
+                                """)
+        result = self.cursor.fetchall()
+        
+        #Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Title', 'Average Rating'])
+        print("Top 5 movies directed by Michael Bay: \n")
+        print(df,"\n")
+    
+    def top_rated_by_comedy(self):
+        self.cursor.execute("""SELECT movies.title, AVG(ratings.rating) AS avg_rating
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE movies.genre = 'Comedy'
+                                GROUP BY movies.title
+                                ORDER BY avg_rating DESC
+                                LIMIT 5;
+                                """)
+        result=self.cursor.fetchall()
+        
+        
+        # Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Title', 'Average Rating'])
+        print("Top 5 comedy movies: \n")
+        print(df,"\n")
+    
+    def top_rated_in_2013(self):
+        self.cursor.execute("""SELECT movies.title, AVG(ratings.rating) AS avg_rating
+                                FROM movies
+                                JOIN ratings ON movies.id = ratings.movie_id
+                                WHERE movies.year = 2013
+                                GROUP BY movies.title
+                                ORDER BY avg_rating DESC
+                                LIMIT 5;
+                                """)
+        result=self.cursor.fetchall()
+        
+        # Convert the result to a Pandas DataFrame for better representation
+        df = pd.DataFrame(result, columns=['Title', 'Average Rating'])
+        print("Top 5 movies rated in 2013: \n")
+        print(df,"\n")
+    
+    
     
 
 
+# Example usage:
+movie_ratings_db = MovieRatingsDatabase()
 
+# Sorting Queries for all the methods in task 2-a
+movie_ratings_db.sorting_query('duration')
+movie_ratings_db.sorting_query('year')
+movie_ratings_db.sorting_query('number_of_ratings')
+movie_ratings_db.sorting_query('avg_rating')
 
+# Printing unique rating ids for task 2-b
+movie_ratings_db.unique_rating_ids()
 
+# Sorting rater IDs by most movies rated and max avg rating for task 2-c
+movie_ratings_db.sort_rater_ids_by_most_movies_rated()
+movie_ratings_db.sort_rater_ids_by_max_avg_ratings()
 
-#insertion_query_ratings='''COPY ratings(rater_id,movie_id,rating,time) FROM 'E:\Job_Assignments\squadcast-assessment\\ratings.csv' CSV HEADER WITH (FORMAT 'csv', DELIMETER ',', Quote '"', NULL 'NULL',TIMEFORMAT 'epoch');'''
+#Top 5 rated movies by different parameters for task 2-d
+movie_ratings_db.top_rated_by_michael_bay()
+movie_ratings_db.top_rated_by_comedy()
+movie_ratings_db.top_rated_in_2013()
 
-
-sorting_query_by_duration='''SELECT title,minutes FROM movies ORDER BY minutes DESC LIMIT 5;'''
-
-result=cursor.execute(sorting_query_by_duration)
-
-print("Top 5 movies by duration:")
-
-print(cursor.fetchall())
-
-sorting_query_by_year='''SELECT title,year FROM movies ORDER BY year DESC LIMIT 5;'''
-
-result=cursor.execute(sorting_query_by_year)
-
-print("Top 5 movies by year:")
-
-print(cursor.fetchall())
-
-sorting_query_by_avg_rating='''SELECT movies.title,AVG(ratings.rating) as avg_rating FROM movies JOIN ratings ON movies.id=ratings.movie_id GROUP BY movies.title ORDER BY avg_rating DESC LIMIT 5;'''
-
-result=cursor.execute(sorting_query_by_avg_rating)
-
-print("Top 5 movies by average rating:")
-
-print(cursor.fetchall())
-
-sorting_query_by_number_of_ratings='''SELECT movies.title,COUNT(ratings.rating) as number_of_ratings FROM movies JOIN ratings ON movies.id=ratings.movie_id GROUP BY movies.title ORDER BY number_of_ratings DESC LIMIT 5;'''
-
-result=cursor.execute(sorting_query_by_number_of_ratings)
-
-print("Top 5 movies by number of ratings:")
-
-print(cursor.fetchall())
-
-         
